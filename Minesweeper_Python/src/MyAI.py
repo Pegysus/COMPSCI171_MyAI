@@ -15,6 +15,11 @@
 from AI import AI
 from Action import Action
 
+import itertools
+
+# FOR TESTING/DEBUGGING PURPOSES
+import os
+
 GLOBAL_UNDEF = -1
 IS_MINE = 9
 
@@ -49,12 +54,16 @@ class MyAI( AI ):
 		########################################################################
 		#							YOUR CODE BEGINS						   #
 		########################################################################
+		# print(rowDimension, colDimension)
+		# print(totalMines)
+		# print(startX, startY)
+
 		self._mines = totalMines
 		self._rows = rowDimension
 		self._cols = colDimension
 		self._dir = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
 
-		self._grid = [[TileNode() for _ in range(colDimension)] for _ in range(rowDimension)]
+		self._grid = [[TileNode() for _ in range(rowDimension)] for _ in range(colDimension)]
 		self._start(startX, startY)
 
 		self._last_move = (startX, startY)
@@ -66,6 +75,13 @@ class MyAI( AI ):
 		# _unc_f is the uncovered frontier (nodes uncovered next to covered nodes), _cov_f is the covered frontier
 		self._unc_f = []
 		self._cov_f = []
+		self._pos_models = []
+		self._all_models = []
+		self._max_model_length = 10
+
+		# FOR TESTING/DEBUGGING PURPOSES
+		self.clear = lambda: os.system('clear')
+
 		########################################################################
 		#							YOUR CODE ENDS							   #
 		########################################################################
@@ -76,55 +92,133 @@ class MyAI( AI ):
 		self._update_adj()
 
 	def _update_adj(self):
-		for r in range(self._rows):
-			for c in range(self._cols):
-				covered = 0
-				marked = 0
-				for dr, dc in self._dir:
-					if self._inbound(r+dr, c+dc) and self._grid[r+dr][c+dc].get_unc() in (GLOBAL_UNDEF, IS_MINE):
-						covered += 1
-					if self._inbound(r+dr, c+dc) and self._grid[r+dr][c+dc].get_flg():
-						marked += 1
-				self._grid[r][c].up_adj(covered)
-				self._grid[r][c].up_eff(marked)
+		for c in range(self._cols):
+			for r in range(self._rows):
+				self._update_tile(c, r)
+	
+	def _update_tile(self, c, r):
+		covered = 0
+		marked = 0
+		for dc, dr in self._dir:
+			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_unc() == GLOBAL_UNDEF:
+				covered += 1
+			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_flg():
+				marked += 1
+		self._grid[c][r].up_adj(covered)
+		self._grid[c][r].up_eff(marked)
 
 	def _inbound(self, x, y):
-		return True if 0 <= x < self._rows and 0 <= y < self._cols else False
+		return True if 0 <= x < self._cols and 0 <= y < self._rows else False
 
 	# Frontier searching fucntions
 	def _find_frontier(self):
-		pass
+		self._unc_f = []
+		self._cov_f = []
+		for c in range(self._cols):
+			for r in range(self._rows):
+				if self._grid[c][r].get_adj() > 0 and self._grid[c][r].get_unc() != GLOBAL_UNDEF:
+					self._unc_f.append((c, r))
+					self._cov_frontier_search(c, r)
+					return
 
-	def _adj_covered(self, row, col):
+	# Recursive function to search for frontier
+	def _cov_frontier_search(self, c, r):
+		for dc, dr in self._dir:
+			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_unc() == GLOBAL_UNDEF \
+					and (c+dc, r+dr) not in self._cov_f:
+
+				self._cov_f.append((c+dc, r+dr))
+				self._unc_frontier_search(c+dc, r+dr)
+
+	def _unc_frontier_search(self, c, r):
+		for dc, dr in self._dir:
+			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_unc() not in (GLOBAL_UNDEF, IS_MINE)  \
+					and (c+dc, r+dr) not in self._unc_f:
+
+				self._unc_f.append((c+dc, r+dr))
+				self._cov_frontier_search(c+dc, r+dr)
+
+	def _adj_covered(self, col, row):
 		num_covered = 0
-		for dr, dc in self._dir:
-			if self._inbound(row+dr, col+dc) and self._grid[row+dr][col+dc].get_unc() in (GLOBAL_UNDEF, IS_MINE):
+		for dc, dr in self._dir:
+			if self._inbound(col+dc, row+dr) and self._grid[col+dc][row+dr].get_unc() in (GLOBAL_UNDEF, IS_MINE):
 				num_covered += 1
 		return num_covered
 
 	
+	# Model Checking implementation
+	def _model_check(self):
+		self._pos_models = []
+		self._cov_f = self._cov_f[:self._max_model_length]
+
+		bit_strings = [''.join(i) for i in itertools.product('01', repeat=len(self._cov_f))]
+		self._all_models = [[int(node) for node in model] for model in bit_strings]
+		for model in self._all_models:
+			self._check_model(model)
+		
+		num_zeroes = [0 for _ in range(len(self._cov_f))]
+		for model in self._pos_models:
+			for i in range(len(model)):
+				if model[i] == 0:
+					num_zeroes[i] += 1
+
+		# FOR TESTING/DEBUGGING PURPOSES
+		print('possible models: ', self._pos_models)
+
+		for i in range(len(num_zeroes)):
+			if num_zeroes[i] == len(self._pos_models):
+				self._uncover_tile(*self._cov_f[i])
+		if self._uncovering == []:
+
+			# FOR TESTING/DEBUGGING PURPOSES
+			print('have to guess')
+			
+			maxi = max(num_zeroes)
+			for i in range(len(num_zeroes)):
+				if num_zeroes[i] == maxi:
+					self._uncover_tile(*self._cov_f[i])
+					break
+
+	def _check_model(self, model):
+		for col, row in self._unc_f:
+			check_model_adj = 0
+			for dc, dr in self._dir:
+				if self._inbound(col+dc, row+dr) and (col+dc, row+dr) in self._cov_f and model[self._cov_f.index((col+dc, row+dr))] == 1:
+					check_model_adj += 1
+			if check_model_adj != self._grid[col][row].get_label():
+				return
+		self._pos_models.append(model)
+
+	
 	# Updating grid functions
-	def _uncover_adj(self, row, col):
+	def _uncover_adj(self, col, row):
 		'''adds all adj tiles to list of tiles to uncover'''
-		for dr, dc in self._dir:
-			if self._inbound(row+dr, col+dc):
-				self._uncover_tile(row+dr, col+dc)
+		for dc, dr in self._dir:
+			if self._inbound(col+dc, row+dr):
+				self._uncover_tile(col+dc, row+dr)
 
-	def _flag_adj(self, row, col):
+	def _flag_adj(self, col, row):
 		'''covers all the adj tiles since they're all mines (eff_label = adj_unc)'''
-		for dr, dc in self._dir:
-			if self._inbound(row+dr, col+dc):
-				self._flag_tile(row+dr, col+dc)
+		for dc, dr in self._dir:
+			if self._inbound(col+dc, row+dr):
+				self._flag_tile(col+dc, row+dr)
 
-	def _uncover_tile(self, row, col):
+	def _uncover_tile(self, col, row):
 		'''uncovers a specific tile'''
-		if self._grid[row][col].get_unc() == GLOBAL_UNDEF and (row, col) not in self._uncovering:
-			self._uncovering.append((row, col))
+		if self._grid[col][row].get_unc() == GLOBAL_UNDEF and (col, row) not in self._uncovering:
+			self._uncovering.append((col, row))
 
-	def _flag_tile(self, row, col):
+	def _flag_tile(self, col, row):
 		'''flags a specific tile'''
-		if not self._grid[row][col].get_flg() and self._grid[row][col].get_unc() == GLOBAL_UNDEF:
-			self._grid[row][col].mark()
+		if not self._grid[col][row].get_flg() and self._grid[col][row].get_unc() == GLOBAL_UNDEF:
+			self._grid[col][row].mark()
+			self._mines -= 1
+			self._update_tile(col, row)
+
+	def _uncover_remaining(self):
+		for c in range(self._cols):
+			for r in range(self._rows):
+				self._uncover_tile(c, r)
 
 		
 	# Action object should represent the x and y coordinate of the tile to be uncovered
@@ -134,26 +228,51 @@ class MyAI( AI ):
 		#							YOUR CODE BEGINS						   #
 		########################################################################
 		
+
+		# FOR TESTING/DEBUGGING PURPOSES
 		# Grid updates from last move (number is tile number of last move)
-		# print(f'last move: {self._last_move}, number: {number}')
+		self.clear()
+		print(f'last move: {self._last_move}, number: {number}')
+
 		self._grid[self._last_move[0]][self._last_move[1]].uncover(number)
 		self._update_adj()
+
 		# FOR TESTING/DEBUGGING PURPOSES
-		# self._print_board()
+		self._print_board()
+
+		# flag everything that can be flagged
+		for c in range(self._cols):
+			for r in range(self._rows):
+				if self._grid[c][r].get_label() == self._grid[c][r].get_adj() and self._grid[c][r].get_label() != 0:
+					# FOR TESTING/DEBUGGING PURPOSES
+					print(f'flagging all at ({c}, {r})')
+					print(f'label of ({c}, {r}): {self._grid[c][r].get_label()}')
+					self._flag_adj(c, r)
+		self._update_adj()
+
+		if self._mines == 0:
+			self._uncover_remaining()
+			if self._uncovering != []:
+				self._last_move = self._uncovering.pop(0)
+				return Action(AI.Action.UNCOVER, self._last_move[0], self._last_move[1])
+			return Action(AI.Action.LEAVE)
 
 		# Add more moves to uncover given new update on board
-		for r in range(self._rows):
-			for c in range(self._cols):
-				if self._grid[r][c].get_label() == 0:
-					self._uncover_adj(r, c)
-				elif self._grid[r][c].get_label() == self._adj_covered(r, c):
-					# print(f'flagging all at ({r}, {c})')
-					# print(f'label of ({r}, {c}): {self._grid[r][c].get_label()}')
-					self._flag_adj(r, c)
+		for c in range(self._cols):
+			for r in range(self._rows):
+				if self._grid[c][r].get_label() == 0:
+					self._uncover_adj(c, r)
+		
+		if self._uncovering == []:
+			self._find_frontier()
+			self._model_check()
+
 		
 		# FOR TESTING/DEBUGGING PURPOSES
-		# print('currently uncovering:', self._uncovering)
-		# _ = input('Press any key to continue...\n')
+		print('current uncover frontiers: ', self._unc_f)
+		print('current covered frontiers: ', self._cov_f)
+		print('currently uncovering:', self._uncovering)
+		_ = input('Press any key to continue...\n')
 
 		# Will uncover move if there is a move to be uncovered
 		if self._uncovering != []:
@@ -167,20 +286,20 @@ class MyAI( AI ):
 
 	# FOR DEBUGGING PURPOSES (TO VISUALIZE THE BOARD)
 	def _print_board(self):
-		print(f"    {' '.join([f'   {col_num+1}  ' for col_num in range(self._cols)])}")
-		for row_num in range(self._rows):
-			print(f'{row_num+1} | ', end='')
-			for col_num in range(self._cols):
-				marking = self._grid[row_num][col_num].get_unc()
+		print(f"    {' '.join([f'   {row_num+1}  ' for row_num in range(self._rows)])}")
+		for col_num in range(self._cols):
+			print(f'{col_num+1} | ', end='')
+			for row_num in range(self._rows):
+				marking = self._grid[col_num][row_num].get_unc()
 				if marking == GLOBAL_UNDEF: marking = '*'
 				elif marking == IS_MINE: marking = 'M'
 				else: marking == str(marking)
 
-				eff_label = self._grid[row_num][col_num].get_label()
+				eff_label = self._grid[col_num][row_num].get_label()
 				if eff_label in (GLOBAL_UNDEF, IS_MINE): eff_label = ' '
 				else: eff_label = str(eff_label)
 
-				adj_tiles = str(self._grid[row_num][col_num].get_adj())
+				adj_tiles = str(self._grid[col_num][row_num].get_adj())
 
 				print(f' {marking}:{eff_label}:{adj_tiles} ', end='')
 			print()
