@@ -16,6 +16,7 @@ from AI import AI
 from Action import Action
 
 import itertools
+import time
 
 # FOR TESTING/DEBUGGING PURPOSES
 import os
@@ -77,7 +78,11 @@ class MyAI( AI ):
 		self._cov_f = []
 		self._pos_models = []
 		self._all_models = []
-		self._max_model_length = 10
+		self._max_model_length = 20
+
+		# Time tracking
+		self._start_time = int(time.time())
+		self._time_diff = 0
 
 		# FOR TESTING/DEBUGGING PURPOSES
 		self.clear = lambda: os.system('clear')
@@ -163,7 +168,7 @@ class MyAI( AI ):
 					num_zeroes[i] += 1
 
 		# FOR TESTING/DEBUGGING PURPOSES
-		print('possible models: ', self._pos_models)
+		# print('possible models: ', self._pos_models)
 
 		for i in range(len(num_zeroes)):
 			if num_zeroes[i] == len(self._pos_models):
@@ -171,7 +176,7 @@ class MyAI( AI ):
 		if self._uncovering == []:
 
 			# FOR TESTING/DEBUGGING PURPOSES
-			print('have to guess')
+			# print('have to guess')
 			
 			maxi = max(num_zeroes)
 			for i in range(len(num_zeroes)):
@@ -231,22 +236,28 @@ class MyAI( AI ):
 
 		# FOR TESTING/DEBUGGING PURPOSES
 		# Grid updates from last move (number is tile number of last move)
-		self.clear()
-		print(f'last move: {self._last_move}, number: {number}')
+		# self.clear()
+		# print(f'last move: {self._last_move}, number: {number}')
 
 		self._grid[self._last_move[0]][self._last_move[1]].uncover(number)
 		self._update_adj()
 
+		self._cur_time = int(time.time())
+		self._time_diff = self._cur_time - self._start_time
+
+		if self._time_diff > 280:
+			return Action(AI.Action.LEAVE)
+
 		# FOR TESTING/DEBUGGING PURPOSES
-		self._print_board()
+		# self._print_board()
 
 		# flag everything that can be flagged
 		for c in range(self._cols):
 			for r in range(self._rows):
 				if self._grid[c][r].get_label() == self._grid[c][r].get_adj() and self._grid[c][r].get_label() != 0:
 					# FOR TESTING/DEBUGGING PURPOSES
-					print(f'flagging all at ({c}, {r})')
-					print(f'label of ({c}, {r}): {self._grid[c][r].get_label()}')
+					# print(f'flagging all at ({c}, {r})')
+					# print(f'label of ({c}, {r}): {self._grid[c][r].get_label()}')
 					self._flag_adj(c, r)
 		self._update_adj()
 
@@ -269,10 +280,10 @@ class MyAI( AI ):
 
 		
 		# FOR TESTING/DEBUGGING PURPOSES
-		print('current uncover frontiers: ', self._unc_f)
-		print('current covered frontiers: ', self._cov_f)
-		print('currently uncovering:', self._uncovering)
-		_ = input('Press any key to continue...\n')
+		# print('current uncover frontiers: ', self._unc_f)
+		# print('current covered frontiers: ', self._cov_f)
+		# print('currently uncovering:', self._uncovering)
+		# _ = input('Press any key to continue...\n')
 
 		# Will uncover move if there is a move to be uncovered
 		if self._uncovering != []:
@@ -285,21 +296,21 @@ class MyAI( AI ):
 
 
 	# FOR DEBUGGING PURPOSES (TO VISUALIZE THE BOARD)
-	def _print_board(self):
-		print(f"    {' '.join([f'   {row_num+1}  ' for row_num in range(self._rows)])}")
-		for col_num in range(self._cols):
-			print(f'{col_num+1} | ', end='')
-			for row_num in range(self._rows):
-				marking = self._grid[col_num][row_num].get_unc()
-				if marking == GLOBAL_UNDEF: marking = '*'
-				elif marking == IS_MINE: marking = 'M'
-				else: marking == str(marking)
+	# def _print_board(self):
+	# 	print(f"    {' '.join([f'   {row_num+1}  ' for row_num in range(self._rows)])}")
+	# 	for col_num in range(self._cols):
+	# 		print(f'{col_num+1} | ', end='')
+	# 		for row_num in range(self._rows):
+	# 			marking = self._grid[col_num][row_num].get_unc()
+	# 			if marking == GLOBAL_UNDEF: marking = '*'
+	# 			elif marking == IS_MINE: marking = 'M'
+	# 			else: marking == str(marking)
 
-				eff_label = self._grid[col_num][row_num].get_label()
-				if eff_label in (GLOBAL_UNDEF, IS_MINE): eff_label = ' '
-				else: eff_label = str(eff_label)
+	# 			eff_label = self._grid[col_num][row_num].get_label()
+	# 			if eff_label in (GLOBAL_UNDEF, IS_MINE): eff_label = ' '
+	# 			else: eff_label = str(eff_label)
 
-				adj_tiles = str(self._grid[col_num][row_num].get_adj())
+	# 			adj_tiles = str(self._grid[col_num][row_num].get_adj())
 
-				print(f' {marking}:{eff_label}:{adj_tiles} ', end='')
-			print()
+	# 			print(f' {marking}:{eff_label}:{adj_tiles} ', end='')
+	# 		print()
