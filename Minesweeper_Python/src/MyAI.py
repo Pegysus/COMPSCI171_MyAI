@@ -17,6 +17,7 @@ from Action import Action
 
 import itertools
 import time
+import random
 
 # FOR TESTING/DEBUGGING PURPOSES
 import os
@@ -74,11 +75,18 @@ class MyAI( AI ):
 		self._updates = []
 
 		# _unc_f is the uncovered frontier (nodes uncovered next to covered nodes), _cov_f is the covered frontier
+		self._all_cov_f = []
+		self._t_cov_f = []
+		self._all_unc_f = []
+		self._t_unc_f = []
+
 		self._unc_f = []
 		self._cov_f = []
+
 		self._pos_models = []
 		self._all_models = []
-		self._max_model_length = 20
+		self._max_model_length = 18
+		self._guessing = []
 
 		# Time tracking
 		self._start_time = int(time.time())
@@ -115,33 +123,50 @@ class MyAI( AI ):
 	def _inbound(self, x, y):
 		return True if 0 <= x < self._cols and 0 <= y < self._rows else False
 
-	# Frontier searching fucntions
-	def _find_frontier(self):
-		self._unc_f = []
-		self._cov_f = []
+
+	# TODO: frontier search optimization #2 (if expert mode still isn't optimized enough): search for all current frontiers
+	# as there can be multiple frontiers of different length. Then pick the one of smallest length and search there
+	# If smallest length frontier doesn't yield any results, go to next largest, etc. etc.
+	# (Hopefully it's more optimal?)
+	def _find_all_cov_frontiers(self):
+		self._all_cov_f = []
+		self._all_unc_f = []
+
 		for c in range(self._cols):
 			for r in range(self._rows):
-				if self._grid[c][r].get_adj() > 0 and self._grid[c][r].get_unc() != GLOBAL_UNDEF:
-					self._unc_f.append((c, r))
-					self._cov_frontier_search(c, r)
-					return
+				if self._grid[c][r].get_adj() > 0 and self._grid[c][r].get_unc() not in (GLOBAL_UNDEF, IS_MINE) \
+					and not any((c, r) in f for f in self._all_unc_f):
 
-	# Recursive function to search for frontier
-	def _cov_frontier_search(self, c, r):
+						self._t_unc_f = []
+						self._t_cov_f = []
+						self._total_f(c,r)
+						self._all_cov_f.append(self._t_cov_f)
+						self._all_unc_f.append(self._t_unc_f)
+		
+		#FOR TESTING/DEBUGGING PURPOSES
+		# print('# of frontiers:', len(self._all_cov_f))
+		# for i in range(len(self._all_cov_f)):
+		# 	print(f'\tfrontier {i} start: {self._all_cov_f[i][0]}')
+		# 	print(f'\t\t{self._all_cov_f[i]}')
+
+	def _total_f(self, c, r):
+		self._t_unc_f.append((c,r))
+		self._cov_f_search(c,r)
+	def _cov_f_search(self, c, r):
 		for dc, dr in self._dir:
 			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_unc() == GLOBAL_UNDEF \
-					and (c+dc, r+dr) not in self._cov_f:
+					and (c+dc, r+dr) not in self._t_cov_f and len(self._t_cov_f) < self._max_model_length \
+					and not any((c+dc, r+dr) in f for f in self._all_cov_f):
 
-				self._cov_f.append((c+dc, r+dr))
-				self._unc_frontier_search(c+dc, r+dr)
-
-	def _unc_frontier_search(self, c, r):
+				self._t_cov_f.append((c+dc, r+dr))
+				self._unc_f_search(c+dc,r+dr)
+	def _unc_f_search(self, c, r):
 		for dc, dr in self._dir:
-			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_unc() not in (GLOBAL_UNDEF, IS_MINE)  \
-					and (c+dc, r+dr) not in self._unc_f:
+			if self._inbound(c+dc, r+dr) and self._grid[c+dc][r+dr].get_unc() not in (GLOBAL_UNDEF, IS_MINE) \
+				and (c+dc, r+dr) not in self._t_unc_f and not any((c+dc, r+dr) in f for f in self._all_unc_f):
 
-				self._unc_f.append((c+dc, r+dr))
-				self._cov_frontier_search(c+dc, r+dr)
+				self._t_unc_f.append((c+dc, r+dr))
+				self._cov_f_search(c+dc,r+dr)
 
 	def _adj_covered(self, col, row):
 		num_covered = 0
@@ -154,12 +179,26 @@ class MyAI( AI ):
 	# Model Checking implementation
 	def _model_check(self):
 		self._pos_models = []
-		self._cov_f = self._cov_f[:self._max_model_length]
 
 		bit_strings = [''.join(i) for i in itertools.product('01', repeat=len(self._cov_f))]
+
+		# FOR TESTING/DEBUGGING PURPOSES
+		print('length of covered frontier:', len(self._cov_f), 'length of unc frontier:', len(self._unc_f))
+
 		self._all_models = [[int(node) for node in model] for model in bit_strings]
 		for model in self._all_models:
+			self._cur_time = int(time.time())
+			self._time_diff = self._cur_time - self._start_time
+			if self._time_diff > 280:
+				return
+
 			self._check_model(model)
+
+		# FOR TESTING/DEBUGGING PURPOSES
+		# print('checking model, cur time:', self._time_diff)
+		print('possible models:')
+		for model in self._pos_models:
+			print(f'\t{model}')
 		
 		num_zeroes = [0 for _ in range(len(self._cov_f))]
 		for model in self._pos_models:
@@ -169,20 +208,25 @@ class MyAI( AI ):
 
 		# FOR TESTING/DEBUGGING PURPOSES
 		# print('possible models: ', self._pos_models)
+		print('num zeroes:', num_zeroes)
 
 		for i in range(len(num_zeroes)):
-			if num_zeroes[i] == len(self._pos_models):
+			if num_zeroes[i] == len(self._pos_models) and len(self._pos_models) != 0:
 				self._uncover_tile(*self._cov_f[i])
+			# elif num_zeroes[i] == 0:
+			# 	self._flag_tile(*self._cov_f[i])
 		if self._uncovering == []:
 
 			# FOR TESTING/DEBUGGING PURPOSES
-			# print('have to guess')
+			print('have to guess')
 			
 			maxi = max(num_zeroes)
+			guesses = []
 			for i in range(len(num_zeroes)):
 				if num_zeroes[i] == maxi:
-					self._uncover_tile(*self._cov_f[i])
-					break
+					guesses.append(self._cov_f[i])
+
+			self._guess_tile(*guesses[random.randint(0, len(guesses)-1)])
 
 	def _check_model(self, model):
 		for col, row in self._unc_f:
@@ -212,6 +256,10 @@ class MyAI( AI ):
 		'''uncovers a specific tile'''
 		if self._grid[col][row].get_unc() == GLOBAL_UNDEF and (col, row) not in self._uncovering:
 			self._uncovering.append((col, row))
+	def _guess_tile(self, col, row):
+		'''guesses a specific tile'''
+		if self._grid[col][row].get_unc() == GLOBAL_UNDEF and (col, row) not in self._uncovering:
+			self._guessing.append((col, row))
 
 	def _flag_tile(self, col, row):
 		'''flags a specific tile'''
@@ -236,8 +284,8 @@ class MyAI( AI ):
 
 		# FOR TESTING/DEBUGGING PURPOSES
 		# Grid updates from last move (number is tile number of last move)
-		# self.clear()
-		# print(f'last move: {self._last_move}, number: {number}')
+		self.clear()
+		print(f'last move: {self._last_move}, number: {number}')
 
 		self._grid[self._last_move[0]][self._last_move[1]].uncover(number)
 		self._update_adj()
@@ -249,15 +297,15 @@ class MyAI( AI ):
 			return Action(AI.Action.LEAVE)
 
 		# FOR TESTING/DEBUGGING PURPOSES
-		# self._print_board()
+		self._print_board()
 
 		# flag everything that can be flagged
 		for c in range(self._cols):
 			for r in range(self._rows):
 				if self._grid[c][r].get_label() == self._grid[c][r].get_adj() and self._grid[c][r].get_label() != 0:
 					# FOR TESTING/DEBUGGING PURPOSES
-					# print(f'flagging all at ({c}, {r})')
-					# print(f'label of ({c}, {r}): {self._grid[c][r].get_label()}')
+					print(f'flagging all at ({c}, {r})')
+					print(f'label of ({c}, {r}): {self._grid[c][r].get_label()}')
 					self._flag_adj(c, r)
 		self._update_adj()
 
@@ -275,19 +323,41 @@ class MyAI( AI ):
 					self._uncover_adj(c, r)
 		
 		if self._uncovering == []:
-			self._find_frontier()
-			self._model_check()
+			# FOR TESTING/DEBUGGING PURPOSES
+			print('basic algorithm found nothing, using frontier/model checking...')
 
-		
+			self._find_all_cov_frontiers()
+
+			# FOR TESTING/DEBUGGING PURPOSES
+			print('currently uncovering:', self._uncovering)
+			_ = input('Press any key to continue...\n')
+			for i in range(len(self._all_cov_f)):
+				self._guessing = []
+				self._cov_f = self._all_cov_f[i]
+				self._unc_f = self._all_unc_f[i]
+				print('current uncover frontiers: ', self._unc_f)
+				print('current covered frontiers: ', self._cov_f)
+
+				self._model_check()
+
+			_ = input('Press any key to continue...\n')
+
+		if self._time_diff > 280:
+			return Action(AI.Action.LEAVE)
+
 		# FOR TESTING/DEBUGGING PURPOSES
 		# print('current uncover frontiers: ', self._unc_f)
 		# print('current covered frontiers: ', self._cov_f)
 		# print('currently uncovering:', self._uncovering)
 		# _ = input('Press any key to continue...\n')
+		
 
 		# Will uncover move if there is a move to be uncovered
 		if self._uncovering != []:
 			self._last_move = self._uncovering.pop(0)
+			return Action(AI.Action.UNCOVER, self._last_move[0], self._last_move[1])
+		elif self._guessing != []:
+			self._last_move = self._guessing.pop(0)
 			return Action(AI.Action.UNCOVER, self._last_move[0], self._last_move[1])
 		return Action(AI.Action.LEAVE)
 		########################################################################
@@ -296,21 +366,21 @@ class MyAI( AI ):
 
 
 	# FOR DEBUGGING PURPOSES (TO VISUALIZE THE BOARD)
-	# def _print_board(self):
-	# 	print(f"    {' '.join([f'   {row_num+1}  ' for row_num in range(self._rows)])}")
-	# 	for col_num in range(self._cols):
-	# 		print(f'{col_num+1} | ', end='')
-	# 		for row_num in range(self._rows):
-	# 			marking = self._grid[col_num][row_num].get_unc()
-	# 			if marking == GLOBAL_UNDEF: marking = '*'
-	# 			elif marking == IS_MINE: marking = 'M'
-	# 			else: marking == str(marking)
+	def _print_board(self):
+		print(f"    {' '.join([f'   {row_num+1}  ' for row_num in range(self._rows)])}")
+		for col_num in range(self._cols):
+			print(f'{col_num+1}'.ljust(3) + '| ', end='')
+			for row_num in range(self._rows):
+				marking = self._grid[col_num][row_num].get_unc()
+				if marking == GLOBAL_UNDEF: marking = '*'
+				elif marking == IS_MINE: marking = 'M'
+				else: marking == str(marking)
 
-	# 			eff_label = self._grid[col_num][row_num].get_label()
-	# 			if eff_label in (GLOBAL_UNDEF, IS_MINE): eff_label = ' '
-	# 			else: eff_label = str(eff_label)
+				eff_label = self._grid[col_num][row_num].get_label()
+				if eff_label in (GLOBAL_UNDEF, IS_MINE): eff_label = ' '
+				else: eff_label = str(eff_label)
 
-	# 			adj_tiles = str(self._grid[col_num][row_num].get_adj())
+				adj_tiles = str(self._grid[col_num][row_num].get_adj())
 
-	# 			print(f' {marking}:{eff_label}:{adj_tiles} ', end='')
-	# 		print()
+				print(f' {marking}:{eff_label}:{adj_tiles} ', end='')
+			print()
